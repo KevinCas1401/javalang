@@ -1,0 +1,7 @@
+public static void main() {
+  int a = 2 + 3 * 5;
+  float x = (1.5 + 2.5) / 2;
+  boolean ok = true || false && !false;
+  int b = -(3 - 8) * 2 + 10 % 3;
+  boolean cmp = (2+3*4) >= 10 && 5 != 6 || 7 < 9;
+}

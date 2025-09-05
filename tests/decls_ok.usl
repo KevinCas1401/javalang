@@ -1,0 +1,7 @@
+public static void main() {
+  int a = 5, b = 10;
+  float x = 2.5;
+  boolean ok = true;
+  char c = 'a';
+  String s = "hola";
+}

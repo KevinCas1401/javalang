@@ -1,0 +1,7 @@
+public static void main() {
+  int a = 5, b = 10;
+  float x = 2.5;
+  a = 5 + 3 * (2 - 1);
+  x = x / 2 + 1;    // int->float OK
+  b = a % 3;        // int % int OK
+}
