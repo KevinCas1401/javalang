@@ -1,0 +1,15 @@
+# Build artifacts
+parse
+lexdemo
+gui
+*.o
+
+# Flex/Bison outputs
+lex.yy.c
+parser.tab.c
+parser.tab.h
+parser.output
+
+# Misc
+*.swp
+.DS_Store
