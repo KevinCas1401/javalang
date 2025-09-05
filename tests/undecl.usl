@@ -1,4 +1,0 @@
-public static void main() {
-  int x;
-  a = x + 1;   // 'a' no fue declarada
-}

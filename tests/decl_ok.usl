@@ -1,5 +1,0 @@
-public static void main() {
-  int a, x;
-  x = 10;
-  a = x + 1;
-}
