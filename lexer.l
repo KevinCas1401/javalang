@@ -68,6 +68,10 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 "valueOf"            { return T_VALUEOF; }
 
 
+"String.join"        { return T_JOIN; }
+"join"               { return T_JOIN; }
+
+
 "++"  { return T_INC; }
 "--"  { return T_DEC; }
 

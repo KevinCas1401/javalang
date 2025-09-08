@@ -75,7 +75,7 @@ static int is_reserved(const char* id){
   const char* R[]={"int","float","boolean","char","String","true","false","null",
                    "public","static","void","System","out","println",
                    "if","else","while","for","switch","case","default","break","continue","return",
-                   "Integer","parseInt","Float","parseFloat","Double","parseDouble","valueOf"};
+                   "Integer","parseInt","Float","parseFloat","Double","parseDouble","valueOf","String","join","valueOf"};
   for(size_t i=0;i<sizeof(R)/sizeof(R[0]);++i) if(strcmp(id,R[i])==0) return 1;
   return 0;
 }
@@ -152,7 +152,7 @@ static Type  for_tmp_type = TY_UNDEF;
 static Type fn_params[64];
 static int  fn_arity = 0;
 
-/* lista de tipos para args de llamada */
+/* lista de tipos para args de llamada / join */
 typedef struct TList { Type t; struct TList* next; } TList;
 static TList* tlist_new(Type t, TList* next){ TList* n=(TList*)calloc(1,sizeof(TList)); n->t=t; n->next=next; return n; }
 static TList* tlist_append(TList* a, Type t){ if(!a) return tlist_new(t,NULL); TList* p=a; while(p->next) p=p->next; p->next=tlist_new(t,NULL); return a; }
@@ -184,7 +184,8 @@ static void tlist_free(TList* a){ while(a){ TList* n=a->next; free(a); a=n; } }
 %token T_RETURN
 %token T_INC T_DEC
 %token T_PARSE_INT T_PARSE_FLOAT T_PARSE_DOUBLE
-%token T_VALUEOF  /* String.valueOf */
+%token T_VALUEOF
+%token T_JOIN   /* String.join / join */
 
 /* operadores compuestos */
 %token T_EQ T_NEQ T_GTE T_LTE
@@ -205,6 +206,7 @@ static void tlist_free(TList* a){ while(a){ TList* n=a->next; free(a); a=n; } }
 %type <typ>  ret_type
 %type <tlist> arglist_opt arglist
 %type <typ>  func_call
+%type <tlist> join_elems
 
 %start programa
 
@@ -587,8 +589,30 @@ func_call
   ;
 
 /* ===== Expresiones ===== */
+join_elems
+  : expresion                    { $$ = tlist_new((Type)$1, NULL); }
+  | join_elems ',' expresion     { $$ = tlist_append($1,(Type)$3); }
+  ;
+
 expresion
   : func_call                { $$ = $1; }
+
+  /* ---- String.join(delim, elem1, elem2, ...) → String ---- */
+  | T_JOIN '(' expresion ',' join_elems ')'
+      {
+        int ok = 1;
+        if($3 != TY_STRING){ semf("[Semántico] String.join: el delimitador debe ser String"); ok = 0; }
+        TList* p = $5;
+        while(p){
+          if(p->t != TY_STRING && p->t != TY_ERROR){
+            semf("[Semántico] String.join: todos los elementos deben ser String (encontrado %s)", tname(p->t));
+            ok = 0;
+          }
+          p = p->next;
+        }
+        $$ = ok ? TY_STRING : TY_ERROR;
+        tlist_free($5);
+      }
 
   /* ---- String.valueOf(any) → String ---- */
   | T_VALUEOF '(' expresion ')'
