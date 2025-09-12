@@ -148,7 +148,7 @@ static Func* f_insert_placeholder(const char* id, Type r){
 static int is_reserved(const char* id){
   const char* R[]={"int","float","double","boolean","char","String","true","false","null",
                    "public","static","void","System","out","println",
-                   "if","else","while","for","switch","case","default","break","continue","return",
+                   "if","else","while","do","for","switch","case","default","break","continue","return",
                    "Integer","parseInt","Float","parseFloat","Double","parseDouble","valueOf","join"};
   for(size_t i=0;i<sizeof(R)/sizeof(R[0]);++i) if(strcmp(id,R[i])==0) return 1;
   return 0;
@@ -258,14 +258,14 @@ struct Expr {
 typedef struct StmtList { struct Stmt* s; struct StmtList* next; } StmtList;
 
 typedef struct CaseBlock {
-  struct Expr* label;
-  StmtList* body;
+  struct Expr* label;     /* puede ser int/char/float/double/String */
+  StmtList* body;         /* lista de sentencias del case */
   struct CaseBlock* next;
 } CaseBlock;
 
 typedef enum {
   SK_BLOCK, SK_SEQ, SK_DECL, SK_ASSIGN, SK_PRINT, SK_EXPRSTMT,
-  SK_IF, SK_WHILE, SK_FOR, SK_SWITCH, SK_RETURN, SK_BREAK, SK_CONTINUE
+  SK_IF, SK_WHILE, SK_DOWHILE, SK_FOR, SK_SWITCH, SK_RETURN, SK_BREAK, SK_CONTINUE
 } StmtKind;
 
 typedef struct Stmt {
@@ -277,6 +277,7 @@ typedef struct Stmt {
     struct { struct Expr* e; } print;
     struct { struct Expr* cond; struct Stmt* thenS; struct Stmt* elseS; } sif;
     struct { struct Expr* cond; struct Stmt* body; } swhile;
+    struct { struct Stmt* body; struct Expr* cond; } sdowhile;
     struct { struct Stmt* init; struct Expr* cond; struct Stmt* post; struct Stmt* body; } sfor;
     struct { struct Expr* e; } sret;
     struct { struct Expr* e; } exprstmt;
@@ -570,6 +571,17 @@ static ExecResult exec_stmt(Stmt* s){
       }
       return R;
     }
+    case SK_DOWHILE: {
+      do {
+        ExecResult x = exec_stmt(s->u.sdowhile.body);
+        if(x.sig==ES_RETURN) return x;
+        if(x.sig==ES_BREAK) break;
+        if(x.sig==ES_CONTINUE){ /* pasa directo a cond */ }
+        Value c = eval_expr(s->u.sdowhile.cond);
+        if(!(c.type==TY_BOOL && c.u.bval)) break;
+      } while(1);
+      return R;
+    }
     case SK_FOR: {
       (void)exec_stmt(s->u.sfor.init);
       while(1){
@@ -586,6 +598,7 @@ static ExecResult exec_stmt(Stmt* s){
     case SK_SWITCH: {
       Value sv = eval_expr(s->u.sswitch.sw);
       int matched = 0;
+      /* buscar primer case que coincida */
       CaseBlock* start = NULL;
       for(CaseBlock* c=s->u.sswitch.cases; c; c=c->next){
         if(!matched){
@@ -598,12 +611,13 @@ static ExecResult exec_stmt(Stmt* s){
           for(StmtList* p=c->body; p; p=p->next){
             ExecResult x = exec_stmt(p->s);
             if(x.sig==ES_RETURN) return x;
-            if(x.sig==ES_BREAK){ R.sig=ES_NONE; return R; }
-            if(x.sig==ES_CONTINUE) return x;
+            if(x.sig==ES_BREAK){ R.sig=ES_NONE; return R; } /* salir del switch */
+            if(x.sig==ES_CONTINUE) return x; /* se propaga a un bucle externo */
           }
         }
-        return R;
+        return R; /* no hubo break -> cayó hasta el final */
       } else {
+        /* default si existe */
         for(StmtList* p=s->u.sswitch.deflt; p; p=p->next){
           ExecResult x = exec_stmt(p->s);
           if(x.sig==ES_RETURN) return x;
@@ -649,7 +663,7 @@ static ExecResult exec_stmt(Stmt* s){
 %token T_INT_LIT T_FLOAT_LIT T_CHAR_LIT T_STRING_LIT
 %token T_PRINTLN
 %token T_IF T_ELSE
-%token T_WHILE
+%token T_WHILE T_DO
 %token T_FOR
 %token T_SWITCH T_CASE T_DEFAULT T_BREAK T_CONTINUE
 %token T_RETURN
@@ -676,7 +690,7 @@ static ExecResult exec_stmt(Stmt* s){
 
 /* AST: expresiones y sentencias */
 %type <expr> expresion
-%type <stmt> sentencia bloque if_stmt while_stmt for_stmt switch_stmt
+%type <stmt> sentencia bloque if_stmt while_stmt dowhile_stmt for_stmt switch_stmt
 %type <stmt> asignacion impresion return_stmt break_stmt continue_stmt
 %type <stmt> for_simple_init for_simple_post
 %type <slist> lista_sentencias
@@ -684,7 +698,7 @@ static ExecResult exec_stmt(Stmt* s){
 %type <stmt>  declaracion
 %type <stmt>  declarador
 
-/* NUEVO: ++/-- como sentencia */
+/* ++/-- como sentencia */
 %type <stmt>  incdec_stmt
 
 /* switch helpers */
@@ -805,11 +819,12 @@ lista_sentencias
 sentencia
   : declaracion
   | asignacion ';'
-  | incdec_stmt ';'          /* NUEVO: i++; i--; */
+  | incdec_stmt ';'
   | impresion ';'
   | bloque
   | if_stmt
   | while_stmt
+  | dowhile_stmt
   | for_stmt
   | switch_stmt
   | return_stmt
@@ -846,8 +861,21 @@ while_stmt
         s->u.swhile.cond = $3;
         s->u.swhile.body = $6;
         $$ = s;
-        loop_depth--;
-        if (loop_depth < 0) loop_depth = 0;
+        loop_depth--; if (loop_depth < 0) loop_depth = 0;
+      }
+  ;
+
+/* ===== Do-While ===== */
+dowhile_stmt
+  : T_DO enter_loop sentencia T_WHILE '(' expresion ')' ';'
+      {
+        if ($6->type != TY_BOOL)
+          semf("[Semántico] La condición del do-while debe ser boolean (recibido %s)", tname($6->type));
+        Stmt* s = S_new(SK_DOWHILE);
+        s->u.sdowhile.cond = $6;
+        s->u.sdowhile.body = $3;
+        $$ = s;
+        loop_depth--; if (loop_depth < 0) loop_depth = 0;
       }
   ;
 
@@ -876,7 +904,7 @@ for_simple_init
 
 for_simple_post
   : asignacion              { $$ = $1; }
-  | incdec_stmt             { $$ = $1; }   /* NUEVO: permite i++ / i-- en el post */
+  | incdec_stmt             { $$ = $1; }
   | /* vacío */             { $$ = NULL; }
   ;
 
@@ -884,6 +912,7 @@ for_simple_post
 switch_stmt
   : T_SWITCH '(' expresion ')' { switch_depth++; } '{' case_list_opt default_opt '}' { switch_depth--; 
       Stmt* s=S_new(SK_SWITCH); s->u.sswitch.sw=$3; s->u.sswitch.cases=$7; s->u.sswitch.deflt=$8;
+      /* tipos permitidos: numérico/char/string */
       if(!is_numeric($3->type) && $3->type!=TY_CHAR && $3->type!=TY_STRING)
         semf("[Semántico] switch no soporta tipo %s", tname($3->type));
       $$=s; }
@@ -925,6 +954,7 @@ asignacion
         if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
         if(!(is_numeric(s?s->type:TY_ERROR) && is_numeric($3->type)))
           semf("[Semántico] '+= requiere numéricos");
+        /* lo convertimos en s = s + expr */
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
         Expr* rhs  = E_new(EK_BINOP);
         rhs->u.binop.op='+'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
@@ -949,16 +979,16 @@ asignacion
         st->u.assign.rhs=rhs;
         $$=st;
       }
+  /* puedes extender a T_MULEQ, T_DIVEQ, T_MODEQ si gustas */
   ;
 
-/* ===== NUEVO: ++ / -- ===== */
+/* ===== ++ / -- como sentencia ===== */
 incdec_stmt
   : T_ID T_INC
       {
         Sym* s=st_find($1);
         if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
-        if(!(s && is_numeric(s->type)))
-          semf("[Semántico] '++' requiere variable numérica");
+        if(!(s && is_numeric(s->type))) semf("[Semántico] '++' requiere variable numérica");
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s? s->type:TY_ERROR;
         Expr* one  = E_new(EK_INT); one->type=TY_INT; one->u.ival=1;
         Expr* rhs  = E_new(EK_BINOP); rhs->u.binop.op='+'; rhs->u.binop.l=left; rhs->u.binop.r=one; rhs->type=promote_num(left->type, TY_INT);
@@ -968,8 +998,7 @@ incdec_stmt
       {
         Sym* s=st_find($1);
         if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
-        if(!(s && is_numeric(s->type)))
-          semf("[Semántico] '--' requiere variable numérica");
+        if(!(s && is_numeric(s->type))) semf("[Semántico] '--' requiere variable numérica");
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s? s->type:TY_ERROR;
         Expr* one  = E_new(EK_INT); one->type=TY_INT; one->u.ival=1;
         Expr* rhs  = E_new(EK_BINOP); rhs->u.binop.op='-'; rhs->u.binop.l=left; rhs->u.binop.r=one; rhs->type=promote_num(left->type, TY_INT);
