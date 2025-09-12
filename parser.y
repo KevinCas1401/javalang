@@ -954,7 +954,6 @@ asignacion
         if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
         if(!(is_numeric(s?s->type:TY_ERROR) && is_numeric($3->type)))
           semf("[Semántico] '+= requiere numéricos");
-        /* lo convertimos en s = s + expr */
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
         Expr* rhs  = E_new(EK_BINOP);
         rhs->u.binop.op='+'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
@@ -979,8 +978,54 @@ asignacion
         st->u.assign.rhs=rhs;
         $$=st;
       }
-  /* puedes extender a T_MULEQ, T_DIVEQ, T_MODEQ si gustas */
+  | T_ID T_MULEQ expresion
+      {
+        Sym* s=st_find($1);
+        if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
+        if(!(is_numeric(s?s->type:TY_ERROR) && is_numeric($3->type)))
+          semf("[Semántico] '*=' requiere numéricos");
+        Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
+        Expr* rhs  = E_new(EK_BINOP);
+        rhs->u.binop.op='*'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
+        rhs->type = promote_num(left->type,$3->type);
+        Stmt* st=S_new(SK_ASSIGN);
+        st->u.assign.id=$1; st->u.assign.op='=';
+        st->u.assign.rhs=rhs;
+        $$=st;
+      }
+  | T_ID T_DIVEQ expresion
+      {
+        Sym* s=st_find($1);
+        if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
+        if(!(is_numeric(s?s->type:TY_ERROR) && is_numeric($3->type)))
+          semf("[Semántico] '/=' requiere numéricos");
+        Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
+        Expr* rhs  = E_new(EK_BINOP);
+        rhs->u.binop.op='/'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
+        rhs->type = TY_FLOAT;  /* como ya haces para '/', resultado float */
+        Stmt* st=S_new(SK_ASSIGN);
+        st->u.assign.id=$1; st->u.assign.op='=';
+        st->u.assign.rhs=rhs;
+        $$=st;
+      }
+  | T_ID T_MODEQ expresion
+      {
+        Sym* s=st_find($1);
+        if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
+        /* para '%', exige int % int, igual que en expresiones */
+        if(!((s?s->type:TY_ERROR)==TY_INT && $3->type==TY_INT))
+          semf("[Semántico] '%=' requiere int %% int");
+        Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
+        Expr* rhs  = E_new(EK_BINOP);
+        rhs->u.binop.op='%'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
+        rhs->type = TY_INT;
+        Stmt* st=S_new(SK_ASSIGN);
+        st->u.assign.id=$1; st->u.assign.op='=';
+        st->u.assign.rhs=rhs;
+        $$=st;
+      }
   ;
+
 
 /* ===== ++ / -- como sentencia ===== */
 incdec_stmt
