@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
 #include <string.h>
 #include <stdlib.h>
+#include <locale.h>
 
 /* === declaraciones de flex necesarias para usar yy_scan_string === */
 typedef struct yy_buffer_state *YY_BUFFER_STATE;
@@ -12,6 +13,8 @@ void yy_delete_buffer (YY_BUFFER_STATE b);
 /* hooks exportados por parser.y */
 void parser_reset(void);
 const char* parser_get_log(void);
+const char* exec_get_output(void);
+int parser_get_error_count(void);
 
 /* widgets globales */
 static GtkWidget *txt_input;
@@ -33,15 +36,32 @@ static gchar* get_input_text(void){
 static void on_analyze(GtkButton *btn, gpointer user_data){
   (void)btn; (void)user_data;
   gchar *src = get_input_text();
-  parser_reset(); /* limpia tabla de símbolos y log */
+    setlocale(LC_NUMERIC, "C");
+  parser_reset(); /* limpia tabla de símbolos, AST y logs */
 
   YY_BUFFER_STATE buf = yy_scan_string(src ? src : "");
   yyparse();
   yy_delete_buffer(buf);
 
   const char* log = parser_get_log();
-  set_output(log);
+  const char* out = exec_get_output();
 
+  /* Mostrar salida de ejecución si no hubo errores; si hubo, mostrar log */
+  GString* final = g_string_new("");
+  if (parser_get_error_count()==0) {
+    if (out && *out) {
+      g_string_append(final, "=== OUTPUT ===\n");
+      g_string_append(final, out);
+      g_string_append(final, "\n");
+    }
+  }
+  if (log && *log) {
+    g_string_append(final, "=== LOG ===\n");
+    g_string_append(final, log);
+  }
+
+  set_output(final->str);
+  g_string_free(final, TRUE);
   g_free(src);
 }
 
@@ -55,7 +75,7 @@ static void on_clear(GtkButton *btn, gpointer user_data){
 static void activate(GtkApplication* app, gpointer user_data){
   (void)user_data;
   GtkWidget *win = gtk_application_window_new(app);
-  gtk_window_set_title(GTK_WINDOW(win), "USL Parser");
+  gtk_window_set_title(GTK_WINDOW(win), "USL Parser+Runner");
   gtk_window_set_default_size(GTK_WINDOW(win), 900, 600);
 
   GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
@@ -87,7 +107,7 @@ static void activate(GtkApplication* app, gpointer user_data){
   GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
   gtk_box_pack_start(GTK_BOX(vbox), btn_box, FALSE, FALSE, 0);
 
-  GtkWidget *btn_analyze = gtk_button_new_with_label("Analizar");
+  GtkWidget *btn_analyze = gtk_button_new_with_label("Analizar & Ejecutar");
   g_signal_connect(btn_analyze, "clicked", G_CALLBACK(on_analyze), NULL);
   gtk_box_pack_start(GTK_BOX(btn_box), btn_analyze, FALSE, FALSE, 0);
 
@@ -99,6 +119,7 @@ static void activate(GtkApplication* app, gpointer user_data){
 }
 
 int main(int argc, char **argv){
+  setlocale(LC_ALL, "C");  /* <- asegura '.' como separador decimal */
   GtkApplication *app = gtk_application_new("com.usac.usl", G_APPLICATION_DEFAULT_FLAGS);
   g_signal_connect(app, "activate", G_CALLBACK(activate), NULL);
   int status = g_application_run(G_APPLICATION(app), argc, argv);

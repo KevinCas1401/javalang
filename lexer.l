@@ -27,8 +27,15 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 
 "int"        { return T_INT; }
 "float"      { return T_FLOAT; }
+"double"     { return T_DOUBLE; }   /* <-- agregado */
 "boolean"    { return T_BOOLEAN; }
 "char"       { return T_CHAR; }
+"String.valueOf"     { return T_VALUEOF; }
+"valueOf"            { return T_VALUEOF; }
+
+"String.join"        { return T_JOIN; }
+"join"               { return T_JOIN; }
+
 "String"     { return T_STRING; }
 
 "true"       { return T_TRUE; }
@@ -53,7 +60,6 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 
 "System.out.println" { return T_PRINTLN; }
 
-
 "Integer.parseInt"   { return T_PARSE_INT; }
 "parseInt"           { return T_PARSE_INT; }
 
@@ -62,15 +68,6 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 
 "Double.parseDouble" { return T_PARSE_DOUBLE; }
 "parseDouble"        { return T_PARSE_DOUBLE; }
-
-
-"String.valueOf"     { return T_VALUEOF; }
-"valueOf"            { return T_VALUEOF; }
-
-
-"String.join"        { return T_JOIN; }
-"join"               { return T_JOIN; }
-
 
 "++"  { return T_INC; }
 "--"  { return T_DEC; }
