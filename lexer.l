@@ -1,9 +1,27 @@
-%option noinput nounput
+
+%option noinput nounput yylineno
 %{
 #include "parser.tab.h"
 #include <string.h>
 #include <stdlib.h>
+
+/* --- tracking de columnas para %locations --- */
+static int curr_col = 1;
+/* Para cada token consumido, actualiza yylloc y la columna actual */
+#define YY_USER_ACTION \
+  do { \
+    yylloc.first_line   = yylineno; \
+    yylloc.last_line    = yylineno; \
+    yylloc.first_column = curr_col; \
+    yylloc.last_column  = curr_col + (int)yyleng - 1; \
+    curr_col += (int)yyleng; \
+  } while(0);
 %}
+
+
+
+
+
 
 /* --- reglas auxiliares --- */
 ws      [ \t\r]+
@@ -21,7 +39,7 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 %%
 
 {ws}                 ;
-{nl}                 ;
+{nl}    { curr_col = 1; /* yylineno ya lo aumenta flex */ }
 "//".*               ;
 "/\\*"(\\*+[^*/]|[^*])*"\\*/" ;
 

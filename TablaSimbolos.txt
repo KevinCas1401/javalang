@@ -1,0 +1,18 @@
+ID	Tipo símbolo	Tipo dato	Ámbito	Línea	Columna
+sumar	Función	int	Global	1	19
+esPar	Función	boolean	Global	6	99
+main	Función	void	Global	11	174
+a	Variable	int	sumar	1	29
+b	Variable	int	sumar	1	36
+r	Variable	int	sumar	2	49
+x	Variable	int	esPar	6	109
+m	Variable	int	esPar	7	122
+a	Variable	int	main	12	191
+b	Variable	int	main	12	199
+msg	Variable	String	main	13	218
+ok	Variable	boolean	main	14	244
+s	Variable	int	main	16	278
+k	Variable	int	main	18	309
+t	Variable	int	Block#1	19	342
+c	Variable	char	Block#2	24	410
+f	Variable	float	Block#2	25	433

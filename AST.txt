@@ -1,0 +1,96 @@
+Árbol de Sintaxis Abstracta (AST)
+=================================
+
+- Función sumar : int
+  - Parámetros
+    - a : int
+    - b : int
+  - Cuerpo
+    - Block
+      - Seq
+        - Decl r : int
+          - Init
+            - BinOp(+)
+              - Id(a)
+              - Id(b)
+      - return
+        - Id(r)
+- Función esPar : boolean
+  - Parámetros
+    - x : int
+  - Cuerpo
+    - Block
+      - Seq
+        - Decl m : int
+          - Init
+            - BinOp(%)
+              - Id(x)
+              - Int(2)
+      - return
+        - BinOp(==)
+          - Id(m)
+          - Int(0)
+- Función main : void
+  - Cuerpo
+    - Block
+      - Seq
+        - Decl a : int
+          - Init
+            - Int(10)
+        - Decl b : int
+          - Init
+            - Int(20)
+      - Seq
+        - Decl msg : String
+          - Init
+            - String("Hola")
+      - Seq
+        - Decl ok : boolean
+          - Init
+            - MethodCall(.equals)
+              - Id(msg)
+              - String("Hola")
+      - Seq
+        - Decl s : int
+          - Init
+            - Call(sumar)
+              - Id(a)
+              - Id(b)
+      - for
+        - init
+          - Seq
+            - Decl k : int
+              - Init
+                - Int(0)
+        - cond
+          - BinOp(<)
+            - Id(k)
+            - Int(3)
+        - post
+          - Assign k =
+            - BinOp(+)
+              - Id(k)
+              - Int(1)
+        - body
+          - Block
+            - Seq
+              - Decl t : int
+                - Init
+                  - BinOp(+)
+                    - Id(k)
+                    - Int(1)
+            - println
+              - Id(t)
+      - Block
+        - Seq
+          - Decl c : char
+            - Init
+              - Char('Z')
+        - Seq
+          - Decl f : float
+            - Init
+              - Float(3.5)
+        - println
+          - Id(c)
+      - println
+        - String("fin")

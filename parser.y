@@ -65,30 +65,124 @@ static Value V_null(void){ Value v; v.type=TY_NULL; return v; }
 static Value V_void(void){ Value v; v.type=TY_VOID; return v; }
 static void value_free(Value* v){ if(v && v->type==TY_STRING && v->u.sval){ free(v->u.sval); v->u.sval=NULL; } }
 
-/* -------- tabla de símbolos con ENTORNOS -------- */
-typedef struct Sym { char* name; Type type; Value val; struct Sym* next; } Sym;
-typedef struct Scope { Sym* table; struct Scope* parent; } Scope;
+/* ==================== TS con Ámbitos + Posiciones ==================== */
+typedef struct Sym {
+  char* name;
+  Type type;
+  Value val;
+  char* kind;          /* "Variable" | "Función" */
+  char* scope_name;    /* "Global", "main", "Block#N", etc. */
+  int   line, col;     /* posición de declaración */
+  struct Sym* next;
+} Sym;
+
+typedef struct Scope {
+  Sym* table;
+  struct Scope* parent;
+  char* scope_name;
+} Scope;
+
 static Scope* current_scope = NULL;
+static Scope* root_scope = NULL;
+static int block_counter = 0;
+
+
+/* ===== Copia de símbolos para reporte ===== */
+typedef struct SymRep {
+  char* name;
+  char* kind;        /* "Variable" | "Función" */
+  char* scope_name;  /* "Global", "main", "Block#N", etc. */
+  Type  type;
+  int   line, col;
+  struct SymRep* next;
+} SymRep;
+
+static SymRep* SYMREP_HEAD = NULL;
+static SymRep* SYMREP_TAIL = NULL;
+
+static void symrep_reset(void){
+  SymRep* p = SYMREP_HEAD;
+  while(p){
+    SymRep* n = p->next;
+    free(p->name); free(p->kind); free(p->scope_name);
+    free(p);
+    p = n;
+  }
+  SYMREP_HEAD = SYMREP_TAIL = NULL;
+}
+
+static void symrep_add_from(const Sym* s){
+  if(!s) return;
+  SymRep* r = (SymRep*)calloc(1,sizeof(SymRep));
+  r->name = strdup(s->name);
+  r->kind = strdup(s->kind ? s->kind : "Variable");
+  r->scope_name = strdup(s->scope_name ? s->scope_name : "Global");
+  r->type = s->type;
+  r->line = s->line; r->col = s->col;
+  if(!SYMREP_HEAD){ SYMREP_HEAD = SYMREP_TAIL = r; }
+  else { SYMREP_TAIL->next = r; SYMREP_TAIL = r; }
+}
+
+
+
 
 static void st_free_list(Sym* p){
-  while(p){ Sym* n=p->next; free(p->name); value_free(&p->val); free(p); p=n; }
+  while(p){
+    Sym* n=p->next;
+    free(p->name);
+    free(p->kind);
+    free(p->scope_name);
+    value_free(&p->val);
+    free(p);
+    p=n;
+  }
 }
-static void st_push_scope(void){ Scope* s=(Scope*)calloc(1,sizeof(Scope)); s->parent=current_scope; current_scope=s; }
+
+static void st_push_scope_named(const char* nm){
+  Scope* s=(Scope*)calloc(1,sizeof(Scope));
+  s->parent=current_scope;
+  s->table=NULL;
+  s->scope_name = nm ? strdup(nm) : strdup("Anon");
+  current_scope=s;
+  if(!root_scope) root_scope = s;
+}
+static void st_push_scope(void){
+  char buf[32];
+  snprintf(buf,sizeof(buf),"Block#%d", ++block_counter);
+  st_push_scope_named(buf);
+}
 static void st_pop_scope(void){
-  if(!current_scope) return; Scope* parent=current_scope->parent;
-  st_free_list(current_scope->table); free(current_scope); current_scope=parent;
+  if(!current_scope) return;
+  Scope* parent=current_scope->parent;
+  st_free_list(current_scope->table);
+  free(current_scope->scope_name);
+  if(current_scope==root_scope) root_scope=NULL;
+  free(current_scope);
+  current_scope=parent;
 }
-static void st_reset(void){ while(current_scope) st_pop_scope(); }
+static void st_reset(void){
+  while(current_scope) st_pop_scope();
+  block_counter = 0;
+  st_push_scope_named("Global");
+  root_scope = current_scope;
+}
 
 static Sym* st_find_local(const char* id){ for(Sym* p=current_scope?current_scope->table:NULL;p;p=p->next) if(strcmp(p->name,id)==0) return p; return NULL; }
 static Sym* st_find(const char* id){
   for(Scope* s=current_scope; s; s=s->parent) for(Sym* p=s->table; p; p=p->next) if(strcmp(p->name,id)==0) return p;
   return NULL;
 }
-static Sym* st_insert_sym(const char* id, Type t){
-  if(!current_scope) st_push_scope();
+
+/* Inserta símbolo con posición */
+static Sym* st_insert_sym_pos_here(const char* id, Type t, const char* kind, int line, int col){
+  if(!current_scope) st_reset();
   if(st_find_local(id)){ semf("[Semántico] Identificador redeclarado en el mismo ámbito: %s", id); return NULL; }
-  Sym* s=(Sym*)calloc(1,sizeof(Sym)); s->name=strdup(id); s->type=t;
+  Sym* s=(Sym*)calloc(1,sizeof(Sym));
+  s->name=strdup(id);
+  s->type=t;
+  s->kind=strdup(kind?kind:"Variable");
+  s->scope_name = strdup(current_scope && current_scope->scope_name ? current_scope->scope_name : "Global");
+  s->line=line; s->col=col;
   if(t==TY_INT) s->val=V_int(0);
   else if(t==TY_FLOAT) s->val=V_float(0.0f);
   else if(t==TY_DOUBLE) s->val=V_float(0.0f);
@@ -96,9 +190,84 @@ static Sym* st_insert_sym(const char* id, Type t){
   else if(t==TY_CHAR) s->val=V_char('\0');
   else if(t==TY_STRING) s->val=V_string("");
   else s->val=V_void();
-  s->next=current_scope->table; current_scope->table=s; return s;
+  s->next=current_scope->table; current_scope->table=s;
+
+  if(line > 0 || col > 0) {
+    symrep_add_from(s);
 }
-static void st_insert(const char* id, Type t){ (void)st_insert_sym(id,t); }
+   return s;
+}
+
+/* Reporte TSV de símbolos (encabezado + filas) */
+static void st_dump_scope(FILE* f, Scope* sc){
+  if(!sc) return;
+  for(Sym* p=sc->table; p; p=p->next){
+    fprintf(f, "%s\t%s\t%s\t%s\t%d\t%d\n",
+            p->name,
+            p->kind ? p->kind : "Variable",
+            (p->type==TY_INT?"int": p->type==TY_FLOAT?"float": p->type==TY_DOUBLE?"double": p->type==TY_BOOL?"boolean": p->type==TY_CHAR?"char": p->type==TY_STRING?"String": p->type==TY_VOID?"void": p->type==TY_NULL?"null":"<undef>"),
+            p->scope_name ? p->scope_name : "Global",
+            p->line, p->col);
+  }
+}
+static void st_dump_all(FILE* f, Scope* sc){
+  if(!sc) return;
+  /* recorrer hasta raíz y luego de raíz a hojas para listar Global primero */
+  Scope* stack[256]; int n=0;
+  for(Scope* s=sc; s; s=s->parent){ stack[n++]=s; if(n==256) break; }
+  for(int i=n-1;i>=0;i--) st_dump_scope(f, stack[i]);
+}
+const char* parser_symbols_report(void){
+  static char SYM_BUF[65536];
+  SYM_BUF[0]='\0';
+  FILE* mem = fmemopen(SYM_BUF, sizeof(SYM_BUF), "w");
+  if(mem){
+    fprintf(mem, "ID\tTipo símbolo\tTipo dato\tÁmbito\tLínea\tColumna\n");
+    st_dump_all(mem, current_scope ? current_scope : root_scope);
+    fclose(mem);
+  }
+  return SYM_BUF;
+}
+
+/* ====== REPORTE: TABLA DE SÍMBOLOS A TXT (desde copia) ====== */
+const char* parser_write_symbols_txt(const char* path){
+  static char LAST_PATH[256];
+  if(!path || !*path) path = "TablaSimbolos.txt";
+  FILE* f = fopen(path, "w");
+  if(!f) return NULL;
+
+  fprintf(f, "ID\tTipo símbolo\tTipo dato\tÁmbito\tLínea\tColumna\n");
+
+  /* 1) Primero Global (suele contener las funciones) */
+  for(SymRep* p = SYMREP_HEAD; p; p = p->next){
+    if(p->scope_name && strcmp(p->scope_name, "Global")==0){
+      fprintf(f, "%s\t%s\t%s\t%s\t%d\t%d\n",
+        p->name, p->kind,
+        (p->type==TY_INT?"int": p->type==TY_FLOAT?"float": p->type==TY_DOUBLE?"double":
+         p->type==TY_BOOL?"boolean": p->type==TY_CHAR?"char": p->type==TY_STRING?"String":
+         p->type==TY_VOID?"void": p->type==TY_NULL?"null":"<undef>"),
+        p->scope_name, p->line, p->col);
+    }
+  }
+
+  /* 2) Luego el resto de ámbitos (funciones, blocks, etc.) */
+  for(SymRep* p = SYMREP_HEAD; p; p = p->next){
+    if(!(p->scope_name && strcmp(p->scope_name, "Global")==0)){
+      fprintf(f, "%s\t%s\t%s\t%s\t%d\t%d\n",
+        p->name, p->kind,
+        (p->type==TY_INT?"int": p->type==TY_FLOAT?"float": p->type==TY_DOUBLE?"double":
+         p->type==TY_BOOL?"boolean": p->type==TY_CHAR?"char": p->type==TY_STRING?"String":
+         p->type==TY_VOID?"void": p->type==TY_NULL?"null":"<undef>"),
+        p->scope_name ? p->scope_name : "Global", p->line, p->col);
+    }
+  }
+
+  fclose(f);
+  snprintf(LAST_PATH, sizeof(LAST_PATH), "%s", path);
+  return LAST_PATH;
+}
+
+
 
 /* -------- AST adelante -------- */
 typedef struct Stmt Stmt;
@@ -216,10 +385,12 @@ static int func_depth = 0;
 static Type current_func_ret = TY_UNDEF;
 
 /* expuestos para GUI */
-void parser_reset(void){ st_reset(); f_reset(); log_reset(); out_reset(); semantic_errors = 0; loop_depth = 0; switch_depth = 0; func_depth = 0; current_func_ret = TY_UNDEF; }
+void parser_reset(void){ symrep_reset();  /* NUEVO */st_reset(); f_reset(); log_reset(); out_reset(); semantic_errors = 0; loop_depth = 0; switch_depth = 0; func_depth = 0; current_func_ret = TY_UNDEF; }
 const char* parser_get_log(void){ return LOG_BUF; }
 const char* exec_get_output(void){ return OUT_BUF; }
 int parser_get_error_count(void){ return semantic_errors; }
+/* Reporte TS para GUI */
+const char* parser_symbols_report(void);
 
 /* vars auxiliares */
 static Type current_decl_type = TY_UNDEF;
@@ -258,8 +429,8 @@ struct Expr {
 typedef struct StmtList { struct Stmt* s; struct StmtList* next; } StmtList;
 
 typedef struct CaseBlock {
-  struct Expr* label;     /* puede ser int/char/float/double/String */
-  StmtList* body;         /* lista de sentencias del case */
+  struct Expr* label;
+  StmtList* body;
   struct CaseBlock* next;
 } CaseBlock;
 
@@ -292,6 +463,234 @@ static StmtList* SL_push(StmtList* a, Stmt* s){ StmtList* n=(StmtList*)calloc(1,
 static ArgList* AL_push(ArgList* a, Expr* e){ ArgList* n=(ArgList*)calloc(1,sizeof(ArgList)); n->e=e; n->next=NULL; if(!a) return n; ArgList* p=a; while(p->next) p=p->next; p->next=n; return a; }
 static CaseBlock* CL_push(CaseBlock* a, Expr* lab, StmtList* body){ CaseBlock* n=(CaseBlock*)calloc(1,sizeof(CaseBlock)); n->label=lab; n->body=body; n->next=NULL; if(!a) return n; CaseBlock* p=a; while(p->next) p=p->next; p->next=n; return a; }
 
+
+
+/* ==================== REPORTE AST EN TXT ==================== */
+/* API pública para GUI / main */
+const char* parser_write_ast_txt(const char* path);
+
+/* ---- helpers de impresión ---- */
+static void ast_indent(FILE* f, int lvl){
+  for(int i=0;i<lvl;i++) fputs("  ", f); /* 2 espacios por nivel */
+}
+static void ast_puts(FILE* f, int lvl, const char* s){
+  ast_indent(f, lvl);
+  fputs("- ", f);
+  fputs(s, f);
+  fputc('\n', f);
+}
+
+/* ---- nombre sencillo de tipos ---- */
+static const char* ast_tname(Type t){ return tname(t); }
+
+/* ---- stringify Expr ---- */
+static void ast_dump_expr(FILE* f, struct Expr* e, int lvl);
+
+static void ast_dump_binop_name(int op, char* out, size_t n){
+  const char* s = NULL;
+  switch(op){
+    case '+': s="+"; break; case '-': s="-"; break; case '*': s="*"; break; case '/': s="/"; break; case '%': s="%"; break;
+    case '<': s="<"; break; case '>': s=">"; break;
+    case OP_LTE: s="<="; break; case OP_GTE: s=">="; break;
+    case OP_EQ: s="=="; break; case OP_NEQ: s="!="; break;
+    case OP_AND: s="&&"; break; case OP_OR: s="||"; break;
+    default: s="?"; break;
+  }
+  snprintf(out, n, "%s", s);
+}
+
+static void ast_dump_expr(FILE* f, struct Expr* e, int lvl){
+  if(!e){ ast_puts(f,lvl,"<expr:null>"); return; }
+  char buf[128];
+  switch(e->kind){
+    case EK_INT: snprintf(buf,sizeof(buf),"Int(%d)", e->u.ival); ast_puts(f,lvl,buf); break;
+    case EK_FLOAT: snprintf(buf,sizeof(buf),"Float(%g)", e->u.fval); ast_puts(f,lvl,buf); break;
+    case EK_CHAR: snprintf(buf,sizeof(buf),"Char('%c')", e->u.cval); ast_puts(f,lvl,buf); break;
+    case EK_STRING: snprintf(buf,sizeof(buf),"String(\"%s\")", e->u.sval?e->u.sval:""); ast_puts(f,lvl,buf); break;
+    case EK_BOOL: snprintf(buf,sizeof(buf),"Boolean(%s)", e->u.ival? "true":"false"); ast_puts(f,lvl,buf); break;
+    case EK_NULL: ast_puts(f,lvl,"null"); break;
+    case EK_ID: snprintf(buf,sizeof(buf),"Id(%s)", e->u.id); ast_puts(f,lvl,buf); break;
+    case EK_UNOP:
+      if(e->u.unop.op==OP_NOT) ast_puts(f,lvl,"UnOp(!)");
+      else if(e->u.unop.op=='-') ast_puts(f,lvl,"UnOp(-)");
+      else ast_puts(f,lvl,"UnOp(?)");
+      ast_dump_expr(f, e->u.unop.e, lvl+1);
+      break;
+    case EK_BINOP: {
+      char opn[8]; ast_dump_binop_name(e->u.binop.op, opn, sizeof(opn));
+      snprintf(buf,sizeof(buf),"BinOp(%s)", opn); ast_puts(f,lvl,buf);
+      ast_dump_expr(f, e->u.binop.l, lvl+1);
+      ast_dump_expr(f, e->u.binop.r, lvl+1);
+      break;
+    }
+    case EK_CALL:
+      snprintf(buf,sizeof(buf),"Call(%s)", e->u.call.fname? e->u.call.fname:"<anon>"); ast_puts(f,lvl,buf);
+      for(ArgList* a=e->u.call.args;a;a=a->next) ast_dump_expr(f, a->e, lvl+1);
+      break;
+    case EK_MCALL:
+      snprintf(buf,sizeof(buf),"MethodCall(.%s)", e->u.mcall.mname? e->u.mcall.mname:"<?>"); ast_puts(f,lvl,buf);
+      ast_dump_expr(f, e->u.mcall.recv, lvl+1);
+      for(ArgList* a=e->u.mcall.args;a;a=a->next) ast_dump_expr(f, a->e, lvl+1);
+      break;
+    case EK_JOIN:
+      ast_puts(f,lvl,"String.join");
+      ast_puts(f,lvl+1,"Delimiter");
+      ast_dump_expr(f, e->u.join.delim, lvl+2);
+      ast_puts(f,lvl+1,"Elements");
+      for(ArgList* a=e->u.join.elems;a;a=a->next) ast_dump_expr(f, a->e, lvl+2);
+      break;
+    case EK_VALUEOF:
+      ast_puts(f,lvl,"String.valueOf");
+      ast_dump_expr(f, e->u.one.e, lvl+1);
+      break;
+    case EK_PARSEINT: ast_puts(f,lvl,"Integer.parseInt"); ast_dump_expr(f, e->u.one.e, lvl+1); break;
+    case EK_PARSEFLOAT: ast_puts(f,lvl,"Float.parseFloat"); ast_dump_expr(f, e->u.one.e, lvl+1); break;
+    case EK_PARSEDOB: ast_puts(f,lvl,"Double.parseDouble"); ast_dump_expr(f, e->u.one.e, lvl+1); break;
+    default: ast_puts(f,lvl,"<expr:?>"); break;
+  }
+}
+
+/* ---- stringify Stmt ---- */
+static void ast_dump_stmt(FILE* f, struct Stmt* s, int lvl);
+
+static void ast_dump_stmt_list(FILE* f, struct StmtList* L, int lvl){
+  for(StmtList* p=L;p;p=p->next) ast_dump_stmt(f, p->s, lvl);
+}
+
+static void ast_dump_cases(FILE* f, struct CaseBlock* c, int lvl){
+  for(CaseBlock* p=c;p;p=p->next){
+    ast_puts(f,lvl,"case");
+    ast_dump_expr(f, p->label, lvl+1);
+    ast_dump_stmt_list(f, p->body, lvl+1);
+  }
+}
+
+static void ast_dump_stmt(FILE* f, struct Stmt* s, int lvl){
+  if(!s){ ast_puts(f,lvl,"<stmt:null>"); return; }
+  char buf[128];
+  switch(s->kind){
+    case SK_BLOCK:
+      ast_puts(f,lvl,"Block");
+      ast_dump_stmt_list(f, s->u.block.list, lvl+1);
+      break;
+    case SK_SEQ:
+      ast_puts(f,lvl,"Seq");
+      ast_dump_stmt_list(f, s->u.block.list, lvl+1);
+      break;
+    case SK_DECL:
+      snprintf(buf,sizeof(buf),"Decl %s : %s", s->u.decl.id, ast_tname(s->u.decl.t));
+      ast_puts(f,lvl,buf);
+      if(s->u.decl.init){
+        ast_puts(f,lvl+1,"Init");
+        ast_dump_expr(f, s->u.decl.init, lvl+2);
+      }
+      break;
+    case SK_ASSIGN:
+      snprintf(buf,sizeof(buf),"Assign %s =", s->u.assign.id);
+      ast_puts(f,lvl,buf);
+      ast_dump_expr(f, s->u.assign.rhs, lvl+1);
+      break;
+    case SK_PRINT:
+      ast_puts(f,lvl,"println");
+      ast_dump_expr(f, s->u.print.e, lvl+1);
+      break;
+    case SK_EXPRSTMT:
+      ast_puts(f,lvl,"ExprStmt");
+      ast_dump_expr(f, s->u.exprstmt.e, lvl+1);
+      break;
+    case SK_IF:
+      ast_puts(f,lvl,"if");
+      ast_puts(f,lvl+1,"cond");
+      ast_dump_expr(f, s->u.sif.cond, lvl+2);
+      ast_puts(f,lvl+1,"then");
+      ast_dump_stmt(f, s->u.sif.thenS, lvl+2);
+      if(s->u.sif.elseS){
+        ast_puts(f,lvl+1,"else");
+        ast_dump_stmt(f, s->u.sif.elseS, lvl+2);
+      }
+      break;
+    case SK_WHILE:
+      ast_puts(f,lvl,"while");
+      ast_puts(f,lvl+1,"cond");
+      ast_dump_expr(f, s->u.swhile.cond, lvl+2);
+      ast_puts(f,lvl+1,"body");
+      ast_dump_stmt(f, s->u.swhile.body, lvl+2);
+      break;
+    case SK_DOWHILE:
+      ast_puts(f,lvl,"do-while");
+      ast_puts(f,lvl+1,"body");
+      ast_dump_stmt(f, s->u.sdowhile.body, lvl+2);
+      ast_puts(f,lvl+1,"cond");
+      ast_dump_expr(f, s->u.sdowhile.cond, lvl+2);
+      break;
+    case SK_FOR:
+      ast_puts(f,lvl,"for");
+      if(s->u.sfor.init){ ast_puts(f,lvl+1,"init"); ast_dump_stmt(f, s->u.sfor.init, lvl+2); }
+      ast_puts(f,lvl+1,"cond"); ast_dump_expr(f, s->u.sfor.cond, lvl+2);
+      if(s->u.sfor.post){ ast_puts(f,lvl+1,"post"); ast_dump_stmt(f, s->u.sfor.post, lvl+2); }
+      ast_puts(f,lvl+1,"body"); ast_dump_stmt(f, s->u.sfor.body, lvl+2);
+      break;
+    case SK_SWITCH:
+      ast_puts(f,lvl,"switch");
+      ast_puts(f,lvl+1,"expr");
+      ast_dump_expr(f, s->u.sswitch.sw, lvl+2);
+      ast_puts(f,lvl+1,"cases");
+      ast_dump_cases(f, s->u.sswitch.cases, lvl+2);
+      if(s->u.sswitch.deflt){
+        ast_puts(f,lvl+1,"default");
+        ast_dump_stmt_list(f, s->u.sswitch.deflt, lvl+2);
+      }
+      break;
+    case SK_RETURN:
+      ast_puts(f,lvl,"return");
+      if(s->u.sret.e) ast_dump_expr(f, s->u.sret.e, lvl+1);
+      break;
+    case SK_BREAK: ast_puts(f,lvl,"break"); break;
+    case SK_CONTINUE: ast_puts(f,lvl,"continue"); break;
+    default: ast_puts(f,lvl,"<stmt:?>"); break;
+  }
+}
+
+/* ---- volcamos todas las funciones registradas ---- */
+static void ast_dump_functions(FILE* f){
+  /* ftab está en lista enlazada; lo invertimos a vector para imprimir en orden lógico */
+  int n=0; for(Func* p=ftab;p;p=p->next) n++;
+  Func** arr = (Func**)calloc(n>0?n:1, sizeof(Func*));
+  int i=0; for(Func* p=ftab;p;p=p->next) arr[i++]=p;
+  for(int k=n-1;k>=0;k--){
+    Func* fn = arr[k];
+    if(!fn) continue;
+    char hdr[128];
+    snprintf(hdr,sizeof(hdr),"Función %s : %s", fn->name?fn->name:"<anon>", tname(fn->ret));
+    ast_puts(f,0,hdr);
+    if(fn->arity>0){
+      ast_puts(f,1,"Parámetros");
+      for(int j=0;j<fn->arity;j++){
+        char l[128];
+        snprintf(l,sizeof(l),"%s : %s", fn->pnames?fn->pnames[j]:"p", tname(fn->params?fn->params[j]:TY_UNDEF));
+        ast_puts(f,2,l);
+      }
+    }
+    ast_puts(f,1,"Cuerpo");
+    ast_dump_stmt(f, fn->body, 2);
+  }
+  free(arr);
+}
+
+/* ---- API: escribe el AST a un archivo TXT ---- */
+const char* parser_write_ast_txt(const char* path){
+  static char LAST_PATH[256];
+  if(!path || !*path) path = "AST.txt";
+  FILE* f = fopen(path, "w");
+  if(!f) return NULL;
+  fputs("Árbol de Sintaxis Abstracta (AST)\n", f);
+  fputs("=================================\n\n", f);
+  ast_dump_functions(f);
+  fclose(f);
+  snprintf(LAST_PATH, sizeof(LAST_PATH), "%s", path);
+  return LAST_PATH;
+}
+
 /* ==================== EJECUTOR ==================== */
 typedef enum { ES_NONE=0, ES_RETURN, ES_BREAK, ES_CONTINUE } ExecSignal;
 typedef struct { ExecSignal sig; Value ret; } ExecResult;
@@ -315,7 +714,6 @@ static char* value_to_cstr(Value v){
     default: return strdup("");
   }
 }
-
 static int values_equal(Value L, Value R){
   if(L.type==TY_STRING && R.type==TY_STRING){
     const char* a=L.u.sval?L.u.sval:""; const char* b=R.u.sval?R.u.sval:"";
@@ -481,9 +879,9 @@ static Value eval_expr(Expr* e){
       Value* argv = (Value*)calloc(n>0?n:1, sizeof(Value));
       int i=0; for(ArgList* p=e->u.call.args;p;p=p->next){ argv[i++] = eval_expr(p->e); }
 
-      st_push_scope();
+      st_push_scope_named(e->u.call.fname);
       for(i=0;i<f->arity && i<n;i++){
-        Sym* s = st_insert_sym(f->pnames[i], f->params[i]);
+        Sym* s = st_insert_sym_pos_here(f->pnames[i], f->params[i], "Variable", 0, 0);
         Value v = argv[i];
         if(s){
           if((s->type==TY_FLOAT || s->type==TY_DOUBLE) && v.type==TY_INT) v = V_float((float)v.u.ival);
@@ -524,7 +922,7 @@ static ExecResult exec_stmt(Stmt* s){
       return R;
     }
     case SK_DECL: {
-      Sym* sym = st_insert_sym(s->u.decl.id, s->u.decl.t);
+      Sym* sym = st_insert_sym_pos_here(s->u.decl.id, s->u.decl.t, "Variable", 0, 0);
       if(s->u.decl.init){
         Value v = eval_expr(s->u.decl.init);
         if(sym){
@@ -576,7 +974,7 @@ static ExecResult exec_stmt(Stmt* s){
         ExecResult x = exec_stmt(s->u.sdowhile.body);
         if(x.sig==ES_RETURN) return x;
         if(x.sig==ES_BREAK) break;
-        if(x.sig==ES_CONTINUE){ /* pasa directo a cond */ }
+        if(x.sig==ES_CONTINUE){ }
         Value c = eval_expr(s->u.sdowhile.cond);
         if(!(c.type==TY_BOOL && c.u.bval)) break;
       } while(1);
@@ -598,7 +996,6 @@ static ExecResult exec_stmt(Stmt* s){
     case SK_SWITCH: {
       Value sv = eval_expr(s->u.sswitch.sw);
       int matched = 0;
-      /* buscar primer case que coincida */
       CaseBlock* start = NULL;
       for(CaseBlock* c=s->u.sswitch.cases; c; c=c->next){
         if(!matched){
@@ -611,13 +1008,12 @@ static ExecResult exec_stmt(Stmt* s){
           for(StmtList* p=c->body; p; p=p->next){
             ExecResult x = exec_stmt(p->s);
             if(x.sig==ES_RETURN) return x;
-            if(x.sig==ES_BREAK){ R.sig=ES_NONE; return R; } /* salir del switch */
-            if(x.sig==ES_CONTINUE) return x; /* se propaga a un bucle externo */
+            if(x.sig==ES_BREAK){ R.sig=ES_NONE; return R; }
+            if(x.sig==ES_CONTINUE) return x;
           }
         }
-        return R; /* no hubo break -> cayó hasta el final */
+        return R;
       } else {
-        /* default si existe */
         for(StmtList* p=s->u.sswitch.deflt; p; p=p->next){
           ExecResult x = exec_stmt(p->s);
           if(x.sig==ES_RETURN) return x;
@@ -641,6 +1037,7 @@ static ExecResult exec_stmt(Stmt* s){
 /* ============== Construcción de AST en las acciones ============== */
 %}
 %define parse.error verbose
+%locations
 
 %union {
   int    ival;
@@ -728,19 +1125,27 @@ static ExecResult exec_stmt(Stmt* s){
 %nonassoc T_ELSE
 %%
 
-/* ===== Top-level ===== */
 programa
   : lista_funciones
     {
       if(semantic_errors==0){
         Func* m = f_find("main");
-        if(!m){ log_reset(); log_append("[Runtime] No se encontró función 'main'"); }
-        else {
+        if(!m){
+          log_reset();
+          log_append("[Runtime] No se encontró función 'main'");
+        } else {
           out_reset();
           ExecResult er = exec_stmt(m->body);
           (void)er;
-          log_reset(); log_append("OK: parse y ejecución completados");
+          /* === NUEVO: escribir AST a archivo === */
+          const char* p = parser_write_ast_txt("AST.txt");
+          if(p){ LOGF("Reporte AST escrito en: %s", p); }
+          const char* ps = parser_write_symbols_txt("TablaSimbolos.txt");
+if(ps){ LOGF("Tabla de símbolos escrita en: %s", ps); }
+
         }
+        log_reset();
+        log_append("OK: parse y ejecución completados");
       }
     }
   ;
@@ -767,7 +1172,7 @@ param_list
   : tipo T_ID
       { if(is_reserved($2)) semf("[Semántico] Identificador inválido como parámetro: '%s'", $2);
         else { 
-          st_insert($2,(Type)$1); 
+          st_insert_sym_pos_here($2,(Type)$1,"Variable", @2.first_line, @2.first_column);
           if(fn_arity<64){ fn_params[fn_arity] = (Type)$1; fn_param_names[fn_arity] = strdup($2); fn_arity++; }
         }
         $$ = 1;
@@ -775,7 +1180,7 @@ param_list
   | param_list ',' tipo T_ID
       { if(is_reserved($4)) semf("[Semántico] Identificador inválido como parámetro: '%s'", $4);
         else { 
-          st_insert($4,(Type)$3); 
+          st_insert_sym_pos_here($4,(Type)$3,"Variable", @4.first_line, @4.first_column);
           if(fn_arity<64){ fn_params[fn_arity] = (Type)$3; fn_param_names[fn_arity] = strdup($4); fn_arity++; }
         }
         $$ = $1 + 1;
@@ -787,7 +1192,15 @@ func_decl
       {
         current_func_ret = (Type)$2; func_depth++; fn_arity = 0;
         (void)f_insert_placeholder($3, (Type)$2);
-        st_push_scope();
+
+        /* registrar la función en TS con ámbito Global */
+        Scope* save = current_scope;
+        while(current_scope && current_scope->parent) current_scope = current_scope->parent; /* ir a Global */
+        st_insert_sym_pos_here($3,(Type)$2,"Función", @3.first_line, @3.first_column);
+        current_scope = save;
+
+        /* ámbito interno con nombre de la función */
+        st_push_scope_named($3);
       }
       params_opt ')'
       { loop_depth=0; switch_depth=0; }
@@ -912,7 +1325,6 @@ for_simple_post
 switch_stmt
   : T_SWITCH '(' expresion ')' { switch_depth++; } '{' case_list_opt default_opt '}' { switch_depth--; 
       Stmt* s=S_new(SK_SWITCH); s->u.sswitch.sw=$3; s->u.sswitch.cases=$7; s->u.sswitch.deflt=$8;
-      /* tipos permitidos: numérico/char/string */
       if(!is_numeric($3->type) && $3->type!=TY_CHAR && $3->type!=TY_STRING)
         semf("[Semántico] switch no soporta tipo %s", tname($3->type));
       $$=s; }
@@ -1002,7 +1414,7 @@ asignacion
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
         Expr* rhs  = E_new(EK_BINOP);
         rhs->u.binop.op='/'; rhs->u.binop.l=left; rhs->u.binop.r=$3;
-        rhs->type = TY_FLOAT;  /* como ya haces para '/', resultado float */
+        rhs->type = TY_FLOAT;
         Stmt* st=S_new(SK_ASSIGN);
         st->u.assign.id=$1; st->u.assign.op='=';
         st->u.assign.rhs=rhs;
@@ -1012,7 +1424,6 @@ asignacion
       {
         Sym* s=st_find($1);
         if(!s) semf("[Semántico] Uso de variable no declarada: %s", $1);
-        /* para '%', exige int % int, igual que en expresiones */
         if(!((s?s->type:TY_ERROR)==TY_INT && $3->type==TY_INT))
           semf("[Semántico] '%=' requiere int %% int");
         Expr* left = E_new(EK_ID); left->u.id=$1; left->type=s?s->type:TY_ERROR;
@@ -1066,14 +1477,14 @@ declarador
   : T_ID
       {
         if(is_reserved($1)) semf("[Semántico] Identificador inválido: '%s' es palabra reservada", $1);
-        st_insert($1, current_decl_type);
+        st_insert_sym_pos_here($1, current_decl_type, "Variable", @1.first_line, @1.first_column);
         Stmt* s=S_new(SK_DECL); s->u.decl.id=$1; s->u.decl.t=current_decl_type; s->u.decl.init=NULL; $$=s; }
   | T_ID '=' expresion
       {
         if(is_reserved($1)) semf("[Semántico] Identificador inválido: '%s' es palabra reservada", $1);
         else if(!compatible_assign(current_decl_type,$3->type))
           semf("[Semántico] No compatible: %s = %s", tname(current_decl_type), tname($3->type));
-        st_insert($1, current_decl_type);
+        st_insert_sym_pos_here($1, current_decl_type, "Variable", @1.first_line, @1.first_column);
         Stmt* s=S_new(SK_DECL); s->u.decl.id=$1; s->u.decl.t=current_decl_type; s->u.decl.init=$3; $$=s; }
   ;
 
@@ -1234,6 +1645,7 @@ expresion
         e->type = f ? f->ret : TY_ERROR;
         $$ = e;
       }
+      
 
 %%
 
