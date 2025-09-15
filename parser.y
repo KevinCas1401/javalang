@@ -4,6 +4,9 @@
 #include <string.h>
 #include <stdarg.h>
 #include <ctype.h>
+/* --- FWD del reset del lexer --- */
+void lexer_reset_position(void);
+
 
 /* -------- logging -------- */
 static int semantic_errors = 0;
@@ -19,17 +22,56 @@ static void log_append(const char* msg){
     LOG_BUF[LOG_POS] = '\0';
   }
 }
+
+/* === FWD DECLARATION para el reporte de errores === */
+static void errrep_addf(const char* fmt, ...);
+
 static int semf(const char* fmt, ...){
   char __tmp[512];
   va_list ap; va_start(ap, fmt);
   vsnprintf(__tmp, sizeof(__tmp), fmt, ap);
   va_end(ap);
   log_append(__tmp);
+  /* NUEVO: guardar en el listado de errores con (ámbito, línea, columna) */
+  errrep_addf("%s", __tmp);
   semantic_errors++;
   return 0;
 }
+
 #define LOGF(...)  do{ char __tmp[512]; snprintf(__tmp,sizeof(__tmp), __VA_ARGS__); log_append(__tmp);}while(0)
 #define SEMF(...)  (semf(__VA_ARGS__), 0)
+
+/* ==================== REPORTE DE ERRORES ==================== */
+int g_last_line = 1;
+int g_last_col  = 1;
+
+typedef struct ErrRep {
+  char* descripcion;
+  char* ambito;
+  int   linea;
+  int   columna;
+  struct ErrRep* next;
+} ErrRep;
+
+static ErrRep* ERR_HEAD = NULL;
+static ErrRep* ERR_TAIL = NULL;
+
+static void errrep_reset(void){
+  ErrRep* p = ERR_HEAD;
+  while(p){
+    ErrRep* n = p->next;
+    free(p->descripcion);
+    free(p->ambito);
+    free(p);
+    p = n;
+  }
+  ERR_HEAD = ERR_TAIL = NULL;
+}
+
+
+
+
+
 
 /* -------- Tipos -------- */
 typedef enum { TY_UNDEF=0, TY_INT, TY_FLOAT, TY_DOUBLE, TY_BOOL, TY_CHAR, TY_STRING, TY_VOID, TY_NULL, TY_ERROR } Type;
@@ -82,9 +124,50 @@ typedef struct Scope {
   char* scope_name;
 } Scope;
 
-static Scope* current_scope = NULL;
+
 static Scope* root_scope = NULL;
 static int block_counter = 0;
+static Scope* current_scope = NULL;
+
+/* agrega error usando los últimos (line,col) del lexer y el ámbito actual */
+static void errrep_addf(const char* fmt, ...){
+  char msg[512];
+  va_list ap; va_start(ap, fmt);
+  vsnprintf(msg, sizeof(msg), fmt, ap);
+  va_end(ap);
+
+  ErrRep* e = (ErrRep*)calloc(1,sizeof(ErrRep));
+  e->descripcion = strdup(msg);
+  e->ambito = strdup(current_scope && current_scope->scope_name ? current_scope->scope_name : "Global");
+  e->linea = g_last_line;
+  e->columna = g_last_col;
+
+  if(!ERR_HEAD){ ERR_HEAD = ERR_TAIL = e; }
+  else { ERR_TAIL->next = e; ERR_TAIL = e; }
+}
+
+/* escribe el reporte en TXT con encabezados */
+static const char* parser_write_errors_txt(const char* path){
+  static char LAST_PATH[256];
+  if(!path || !*path) path = "Errores.txt";
+  FILE* f = fopen(path, "w");
+  if(!f) return NULL;
+
+  fprintf(f, "No.\tDescripción\tÁmbito\tLinea\tColumna\n");
+  int i = 1;
+  for(ErrRep* p = ERR_HEAD; p; p = p->next, ++i){
+    fprintf(f, "%d\t%s\t%s\t%d\t%d\n",
+            i,
+            p->descripcion ? p->descripcion : "",
+            p->ambito ? p->ambito : "Global",
+            p->linea,
+            p->columna);
+  }
+  fclose(f);
+  snprintf(LAST_PATH, sizeof(LAST_PATH), "%s", path);
+  return LAST_PATH;
+}
+
 
 
 /* ===== Copia de símbolos para reporte ===== */
@@ -269,6 +352,10 @@ const char* parser_write_symbols_txt(const char* path){
 
 
 
+
+
+
+
 /* -------- AST adelante -------- */
 typedef struct Stmt Stmt;
 typedef struct Expr Expr;
@@ -384,8 +471,26 @@ static int switch_depth = 0;
 static int func_depth = 0;
 static Type current_func_ret = TY_UNDEF;
 
-/* expuestos para GUI */
-void parser_reset(void){ symrep_reset();  /* NUEVO */st_reset(); f_reset(); log_reset(); out_reset(); semantic_errors = 0; loop_depth = 0; switch_depth = 0; func_depth = 0; current_func_ret = TY_UNDEF; }
+void parser_reset(void){
+  /* NUEVO: reset de posición del lexer */
+  lexer_reset_position();
+  g_last_line = 1;
+  g_last_col  = 1;
+
+  symrep_reset();  /* ya lo tienes */
+  st_reset();
+  f_reset();
+  log_reset();
+  out_reset();
+  errrep_reset();
+  semantic_errors = 0;
+  loop_depth = 0;
+  switch_depth = 0;
+  func_depth = 0;
+  current_func_ret = TY_UNDEF;
+}
+
+
 const char* parser_get_log(void){ return LOG_BUF; }
 const char* exec_get_output(void){ return OUT_BUF; }
 int parser_get_error_count(void){ return semantic_errors; }
@@ -1101,7 +1206,7 @@ static ExecResult exec_stmt(Stmt* s){
 /* switch helpers */
 %type <clist> case_list case_list_opt
 %type <slist> default_opt
-%type <slist> case_body
+
 
 /* listas para llamadas/join */
 %type <alist> arglist_opt arglist join_elems
@@ -1128,6 +1233,7 @@ static ExecResult exec_stmt(Stmt* s){
 programa
   : lista_funciones
     {
+      /* 1) Si NO hay errores, podemos ejecutar y sacar AST/TS */
       if(semantic_errors==0){
         Func* m = f_find("main");
         if(!m){
@@ -1137,18 +1243,30 @@ programa
           out_reset();
           ExecResult er = exec_stmt(m->body);
           (void)er;
-          /* === NUEVO: escribir AST a archivo === */
-          const char* p = parser_write_ast_txt("AST.txt");
+
+          /* AST y Tabla de símbolos */
+          const char* p  = parser_write_ast_txt("AST.txt");
           if(p){ LOGF("Reporte AST escrito en: %s", p); }
+
           const char* ps = parser_write_symbols_txt("TablaSimbolos.txt");
-if(ps){ LOGF("Tabla de símbolos escrita en: %s", ps); }
+          if(ps){ LOGF("Tabla de símbolos escrita en: %s", ps); }
 
         }
         log_reset();
         log_append("OK: parse y ejecución completados");
+      } else {
+        /* 2) Si hay errores, NO ejecutamos, pero avisamos en el log */
+        log_append("Se detectaron errores; no se ejecutó 'main'.");
+      }
+
+      /* 3) SIEMPRE escribir el reporte de errores, haya o no errores */
+      {
+        const char* pe = parser_write_errors_txt("Errores.txt");
+        if(pe){ LOGF("Reporte de errores escrito en: %s", pe); }
       }
     }
   ;
+
 
 lista_funciones
   : lista_funciones func_decl
@@ -1649,4 +1767,8 @@ expresion
 
 %%
 
-void yyerror(const char* s){ semf("[Syntax] %s", s); }
+void yyerror(const char* s){
+  /* Mantén el prefijo para distinguir errores de sintaxis en el log */
+  semf("[Syntax] %s", s);
+}
+

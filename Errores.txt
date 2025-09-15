@@ -1,0 +1,2 @@
+No.	Descripción	Ámbito	Linea	Columna
+1	[Semántico] Uso de variable no declarada: y	main	3	5

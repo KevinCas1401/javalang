@@ -5,6 +5,11 @@
 #include <string.h>
 #include <stdlib.h>
 
+/* === para reporte de errores: posición global compartida === */
+extern int g_last_line;
+extern int g_last_col;
+
+
 /* --- tracking de columnas para %locations --- */
 static int curr_col = 1;
 /* Para cada token consumido, actualiza yylloc y la columna actual */
@@ -15,9 +20,11 @@ static int curr_col = 1;
     yylloc.first_column = curr_col; \
     yylloc.last_column  = curr_col + (int)yyleng - 1; \
     curr_col += (int)yyleng; \
+    /* NUEVO: expone la última posición para el reporte de errores */ \
+    g_last_line = yylineno; \
+    g_last_col  = yylloc.first_column; \
   } while(0);
 %}
-
 
 
 
@@ -151,4 +158,10 @@ strlit  \"([^\\\n\"]|\\[nrt\"\\])*\"
 .                             { return yytext[0]; }
 
 %%
+
+void lexer_reset_position(void){
+  yylineno = 1;
+  curr_col = 1;
+}
+
 int yywrap(void){ return 1; }
