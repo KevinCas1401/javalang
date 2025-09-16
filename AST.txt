@@ -1,8 +1,430 @@
 Árbol de Sintaxis Abstracta (AST)
 =================================
 
-- Función main : void
+- Función saludar : void
   - Cuerpo
     - Block
       - println
-        - String("Hola")
+        - String("¡Hola, mundo!")
+- Función obtenerNumero : int
+  - Cuerpo
+    - Block
+      - return
+        - Int(42)
+- Función saludarPersona : void
+  - Parámetros
+    - nombre : String
+  - Cuerpo
+    - Block
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("¡Hola, ")
+            - Id(nombre)
+          - String("!")
+- Función sumar : int
+  - Parámetros
+    - a : int
+    - b : int
+  - Cuerpo
+    - Block
+      - return
+        - BinOp(+)
+          - Id(a)
+          - Id(b)
+- Función factorial : int
+  - Parámetros
+    - n : int
+  - Cuerpo
+    - Block
+      - if
+        - cond
+          - BinOp(<=)
+            - Id(n)
+            - Int(1)
+        - then
+          - return
+            - Int(1)
+      - return
+        - BinOp(*)
+          - Id(n)
+          - Call(factorial)
+            - BinOp(-)
+              - Id(n)
+              - Int(1)
+- Función fibonacci : int
+  - Parámetros
+    - n : int
+  - Cuerpo
+    - Block
+      - if
+        - cond
+          - BinOp(<=)
+            - Id(n)
+            - Int(1)
+        - then
+          - return
+            - Id(n)
+      - return
+        - BinOp(+)
+          - Call(fibonacci)
+            - BinOp(-)
+              - Id(n)
+              - Int(1)
+          - Call(fibonacci)
+            - BinOp(-)
+              - Id(n)
+              - Int(2)
+- Función hanoi : void
+  - Parámetros
+    - n : int
+    - origen : String
+    - auxiliar : String
+    - destino : String
+  - Cuerpo
+    - Block
+      - if
+        - cond
+          - BinOp(==)
+            - Id(n)
+            - Int(1)
+        - then
+          - Block
+            - println
+              - BinOp(+)
+                - BinOp(+)
+                  - BinOp(+)
+                    - String("Mover disco 1 de ")
+                    - Id(origen)
+                  - String(" a ")
+                - Id(destino)
+            - return
+      - ExprStmt
+        - Call(hanoi)
+          - BinOp(-)
+            - Id(n)
+            - Int(1)
+          - Id(origen)
+          - Id(destino)
+          - Id(auxiliar)
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - BinOp(+)
+              - BinOp(+)
+                - BinOp(+)
+                  - String("Mover disco ")
+                  - Id(n)
+                - String(" de ")
+              - Id(origen)
+            - String(" a ")
+          - Id(destino)
+      - ExprStmt
+        - Call(hanoi)
+          - BinOp(-)
+            - Id(n)
+            - Int(1)
+          - Id(auxiliar)
+          - Id(origen)
+          - Id(destino)
+- Función main : void
+  - Cuerpo
+    - Block
+      - Seq
+        - Decl puntos : double
+          - Init
+            - Float(0)
+      - println
+        - String("=== Archivo de prueba de funciones (rubrica nueva) ===")
+      - println
+        - String("==== 1.3.1 Funciones no recursivas sin parámetros (obligatorio) ====")
+      - Seq
+        - Decl p131 : double
+          - Init
+            - Float(0)
+      - println
+        - String("###Validacion Manual")
+      - ExprStmt
+        - Call(saludar)
+      - Seq
+        - Decl n : int
+          - Init
+            - Call(obtenerNumero)
+      - println
+        - BinOp(+)
+          - String("obtenerNumero() -> ")
+          - Id(n)
+      - if
+        - cond
+          - BinOp(==)
+            - Id(n)
+            - Int(42)
+        - then
+          - Block
+            - Assign p131 =
+              - Float(5)
+            - println
+              - String("OK 1.3.1")
+        - else
+          - Block
+            - println
+              - String("X 1.3.1")
+      - println
+        - String("\n==== 1.3.2 Funciones no recursivas con parámetros (obligatorio) ====")
+      - Seq
+        - Decl p132 : double
+          - Init
+            - Float(0)
+      - println
+        - String("###Validacion Manual")
+      - ExprStmt
+        - Call(saludarPersona)
+          - String("Juan")
+      - Seq
+        - Decl s : int
+          - Init
+            - Call(sumar)
+              - Int(10)
+              - Int(20)
+      - println
+        - BinOp(+)
+          - String("sumar(10,20) -> ")
+          - Id(s)
+      - if
+        - cond
+          - BinOp(==)
+            - Id(s)
+            - Int(30)
+        - then
+          - Block
+            - Assign p132 =
+              - Float(5)
+            - println
+              - String("OK 1.3.2")
+        - else
+          - Block
+            - println
+              - String("X 1.3.2")
+      - println
+        - String("\n==== 1.3.3 Funciones recursivas ====")
+      - Seq
+        - Decl p133 : double
+          - Init
+            - Float(0)
+      - Seq
+        - Decl fact5 : int
+          - Init
+            - Call(factorial)
+              - Int(5)
+      - Seq
+        - Decl fib10 : int
+          - Init
+            - Call(fibonacci)
+              - Int(10)
+      - println
+        - BinOp(+)
+          - String("factorial(5) -> ")
+          - Id(fact5)
+      - println
+        - BinOp(+)
+          - String("fibonacci(10) -> ")
+          - Id(fib10)
+      - if
+        - cond
+          - BinOp(==)
+            - Id(fact5)
+            - Int(120)
+        - then
+          - Assign p133 =
+            - BinOp(+)
+              - Id(p133)
+              - Float(5)
+      - if
+        - cond
+          - BinOp(==)
+            - Id(fib10)
+            - Int(55)
+        - then
+          - Assign p133 =
+            - BinOp(+)
+              - Id(p133)
+              - Float(5)
+      - println
+        - String("###Validacion Manual (Hanoi)")
+      - ExprStmt
+        - Call(hanoi)
+          - Int(3)
+          - String("A")
+          - String("B")
+          - String("C")
+      - println
+        - String("\n==== 1.3.4 Parseo de enteros ====")
+      - Seq
+        - Decl p134 : double
+          - Init
+            - Float(0)
+      - Seq
+        - Decl entero : int
+          - Init
+            - Integer.parseInt
+              - String("123")
+      - println
+        - BinOp(+)
+          - String("\"123\" -> ")
+          - Id(entero)
+      - if
+        - cond
+          - BinOp(==)
+            - Id(entero)
+            - Int(123)
+        - then
+          - Block
+            - Assign p134 =
+              - Float(2)
+            - println
+              - String("OK 1.3.4")
+        - else
+          - Block
+            - println
+              - String("X 1.3.4")
+      - println
+        - String("\n==== 1.3.5 Parseo de flotantes ====")
+      - Seq
+        - Decl p135 : double
+          - Init
+            - Float(0)
+      - Seq
+        - Decl f1 : double
+          - Init
+            - Double.parseDouble
+              - String("123.45")
+      - Seq
+        - Decl f2 : double
+          - Init
+            - Double.parseDouble
+              - String("123")
+      - println
+        - BinOp(+)
+          - String("\"123.45\" -> ")
+          - Id(f1)
+      - println
+        - BinOp(+)
+          - String("\"123\" -> ")
+          - Id(f2)
+      - if
+        - cond
+          - BinOp(&&)
+            - BinOp(==)
+              - Id(f1)
+              - Float(123.45)
+            - BinOp(==)
+              - Id(f2)
+              - Float(123)
+        - then
+          - Block
+            - Assign p135 =
+              - Float(1.5)
+            - println
+              - String("OK 1.3.5")
+        - else
+          - Block
+            - println
+              - String("X 1.3.5")
+      - println
+        - String("\n==== 1.3.6 String.valueOf() ====")
+      - Seq
+        - Decl p136 : double
+          - Init
+            - Float(0)
+      - Seq
+        - Decl sv : String
+          - Init
+            - String.valueOf
+              - Int(123)
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("String.valueOf(123) -> \"")
+            - Id(sv)
+          - String("\"")
+      - if
+        - cond
+          - MethodCall(.equals)
+            - String("123")
+            - Id(sv)
+        - then
+          - Block
+            - Assign p136 =
+              - Float(0.5)
+            - println
+              - String("OK 1.3.6")
+        - else
+          - Block
+            - println
+              - String("X 1.3.6")
+      - Assign puntos =
+        - BinOp(+)
+          - BinOp(+)
+            - BinOp(+)
+              - BinOp(+)
+                - BinOp(+)
+                  - Id(p131)
+                  - Id(p132)
+                - Id(p133)
+              - Id(p134)
+            - Id(p135)
+          - Id(p136)
+      - println
+        - String("\n=== Tabla de Resultados ===")
+      - println
+        - String("+----------------------------------+--------+--------+")
+      - println
+        - String("| Característica                   | Puntos | Total  |")
+      - println
+        - String("+----------------------------------+--------+--------+")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.1 Func. sin parámetros       | ")
+            - Id(p131)
+          - String(" |   5   |")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.2 Func. con parámetros       | ")
+            - Id(p132)
+          - String(" |   5   |")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.3 Funciones recursivas       | ")
+            - Id(p133)
+          - String(" |  10   |")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.4 Parseo de enteros          | ")
+            - Id(p134)
+          - String(" |   2   |")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.5 Parseo de flotantes        | ")
+            - Id(p135)
+          - String(" |  1.5  |")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| 1.3.6 String.valueOf()           | ")
+            - Id(p136)
+          - String(" |  0.5  |")
+      - println
+        - String("+----------------------------------+--------+--------+")
+      - println
+        - BinOp(+)
+          - BinOp(+)
+            - String("| TOTAL                            | ")
+            - Id(puntos)
+          - String(" |  26   |")
+      - println
+        - String("+----------------------------------+--------+--------+")
