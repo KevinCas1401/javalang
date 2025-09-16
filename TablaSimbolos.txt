@@ -1,3 +1,2 @@
 ID	Tipo símbolo	Tipo dato	Ámbito	Línea	Columna
 main	Función	void	Global	1	20
-x	Variable	int	main	2	6

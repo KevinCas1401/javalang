@@ -4,7 +4,5 @@
 - Función main : void
   - Cuerpo
     - Block
-      - Seq
-        - Decl x : int
-          - Init
-            - Int(0)
+      - println
+        - String("Hola")

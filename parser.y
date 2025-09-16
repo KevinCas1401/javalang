@@ -571,7 +571,7 @@ static CaseBlock* CL_push(CaseBlock* a, Expr* lab, StmtList* body){ CaseBlock* n
 
 
 /* ==================== REPORTE AST EN TXT ==================== */
-/* API pública para GUI / main */
+
 const char* parser_write_ast_txt(const char* path);
 
 /* ---- helpers de impresión ---- */
